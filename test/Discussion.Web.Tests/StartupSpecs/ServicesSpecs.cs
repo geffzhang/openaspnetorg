@@ -1,14 +1,13 @@
 ﻿using Discussion.Web.Models;
-using Discussion.Web.Data;
+using Discussion.Web.Data.InMemory;
 using Jusfr.Persistent;
-using Jusfr.Persistent.Mongo;
-using Microsoft.AspNet.Hosting;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.PlatformAbstractions;
 using Moq;
 using System;
-using System.IO;
 using Xunit;
+using Microsoft.Extensions.Configuration;
+using Discussion.Web.Data;
 
 namespace Discussion.Web.Tests.StartupSpecs
 {
@@ -21,7 +20,7 @@ namespace Discussion.Web.Tests.StartupSpecs
             IServiceCollection services = null;
 
             // act
-            CreateApplicationServices(serviceCollection => {
+            CreateApplicationServices(c => { }, serviceCollection => {
                 services = serviceCollection;
             });
 
@@ -36,17 +35,19 @@ namespace Discussion.Web.Tests.StartupSpecs
 
 
         [Fact]
-        public void should_add_mongo_reposotiry()
+        public void should_add_ravendb_reposotiry()
         {
             // arrange
-            var applicationServices = CreateApplicationServices();
+            var applicationServices = CreateApplicationServices((configuration) => {
+                configuration["ravenConnectionString"] = "Url=http://ravendb.mydomain.com;Database=Northwind";
+            }, s => { });
 
             // act
-            var repo = applicationServices.GetRequiredService<Repository<Article, int>>();
+            var repo = applicationServices.GetRequiredService<Repository<Article>>();
 
             // assert
             repo.ShouldNotBeNull();
-            repo.GetType().GetGenericTypeDefinition().ShouldEqual(typeof(MongoRepository<,>));
+            repo.GetType().GetGenericTypeDefinition().ShouldEqual(typeof(RavenDataRepository<>));
         }
 
 
@@ -57,32 +58,24 @@ namespace Discussion.Web.Tests.StartupSpecs
             var applicationServices = CreateApplicationServices();
 
             // act
-            var repo = applicationServices.GetRequiredService<IDataRepository<Article>>();
+            var repo = applicationServices.GetRequiredService<IRepository<Article>>();
 
             // assert
             repo.ShouldNotBeNull();
-            repo.GetType().ShouldEqual(typeof(BaseDataRepository<Article>));
+            repo.GetType().ShouldEqual(typeof(InMemoryDataRepository<Article>));
         }
 
         public static IServiceProvider CreateApplicationServices()
         {
-            return CreateApplicationServices((s) => { });
+            return CreateApplicationServices(c => { },  s => { });
         }
 
-        public static IServiceProvider CreateApplicationServices(Action<IServiceCollection> configureServices) {
-            const string dummyDB = "mongodb://localhost/dummydb";
+        public static IServiceProvider CreateApplicationServices(Action<IConfigurationRoot> configureSettings, Action<IServiceCollection> configureServices) {
             var services = new ServiceCollection();
             var startup = CreateMockStartup();
-            startup.Configuration["mongoConnectionString"] = dummyDB;
+            configureSettings(startup.Configuration);
 
-            services.AddInstance<IApplicationEnvironment>(startup.ApplicationEnvironment);
-            services.AddInstance<IHostingEnvironment>(startup.HostingEnvironment);
             startup.ConfigureServices(services);
-
-            services.AddScoped(typeof(IRepositoryContext), (serviceProvider) =>
-            {
-                return new MongoRepositoryContext(dummyDB);
-            });
             configureServices(services);
 
             return services.BuildServiceProvider();
@@ -90,15 +83,11 @@ namespace Discussion.Web.Tests.StartupSpecs
 
         public static Startup CreateMockStartup()
         {
-            var appEnv = new Mock<IApplicationEnvironment>();
-            appEnv.SetupGet(e => e.ApplicationBasePath)
-                .Returns(Directory.GetCurrentDirectory());
-
             var hostingEnv = new Mock<IHostingEnvironment>();
-            hostingEnv.SetupGet(e => e.EnvironmentName)
-                .Returns("Development");
+            hostingEnv.SetupGet(e => e.EnvironmentName).Returns("UnitTest");
+            hostingEnv.SetupGet(e => e.ContentRootPath).Returns(TestEnv.WebProjectPath());
 
-            return new Startup(hostingEnv.Object, appEnv.Object);
+            return new Startup(hostingEnv.Object);
         }
 
     }

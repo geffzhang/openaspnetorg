@@ -1,11 +1,11 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using Microsoft.AspNet.Http;
-using Microsoft.AspNet.Builder;
+using Microsoft.AspNetCore.Http;
 using System;
-using Microsoft.AspNet.Http.Internal;
 using Microsoft.Extensions.Logging;
-using Discussion.Web.Tests.Specs;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Features;
+using System.Threading.Tasks;
 
 namespace Discussion.Web.Tests.StartupSpecs
 {
@@ -25,40 +25,45 @@ namespace Discussion.Web.Tests.StartupSpecs
         [Fact]
         public void should_use_iis_platform()
         {
-            // arrange
-            var httpContext = GivenHttpContextFromIISPlatformHandler();
+            var app = Application.BuildApplication("Dev", host =>
+            {
+                host.UseSetting("PORT", "5000");
+                host.UseSetting("APPL_PATH", "/");
+                host.UseSetting("TOKEN", "dummy-token");
+            });
 
-            // act
-            RequestHandler.Invoke(httpContext);
+            var iisFilter = app.ApplicationServices.GetRequiredService<IStartupFilter>();
 
-            // assert
-            AssertHttpContextAreProperlyRestored(httpContext);
+            var filterName = iisFilter.GetType().FullName;
+            filterName.Contains("IISSetupFilter").ShouldEqual(true);
+
+            (app as IDisposable).Dispose();
         }
 
         [Fact]
-        public void should_use_mvc()
+        public async Task should_use_mvc()
         {
             var httpContext = CreateHttpContext();
             httpContext.Request.Path = IntegrationTests.NotFoundSpecs.NotFoundPath;
 
-            RequestHandler.Invoke(httpContext);
+            await RequestHandler.Invoke(httpContext);
 
-            var loggerFactory = httpContext.ApplicationServices.GetRequiredService<ILoggerFactory>() as StubLoggerFactory;
+            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>() as StubLoggerFactory;
             loggerFactory.ShouldNotBeNull();
             loggerFactory.LogItems.ShouldContain(item => item.Message.Equals("Request did not match any routes."));
         }
 
         [Fact]
-        public void should_use_static_files()
+        public async Task should_use_static_files()
         {
             var staticFile = IntegrationTests.NotFoundSpecs.NotFoundStaticFile;
             var httpContext = CreateHttpContext();
             httpContext.Request.Method = "GET";
             httpContext.Request.Path = staticFile;
 
-            RequestHandler.Invoke(httpContext);
+            await RequestHandler.Invoke(httpContext);
 
-            var loggerFactory = httpContext.ApplicationServices.GetRequiredService<ILoggerFactory>() as StubLoggerFactory;
+            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>() as StubLoggerFactory;
             loggerFactory.ShouldNotBeNull();
             loggerFactory.LogItems.ShouldContain(item => item.Message.Equals($"The request path {staticFile} does not match an existing file"));
         }
@@ -66,43 +71,14 @@ namespace Discussion.Web.Tests.StartupSpecs
         
         private DefaultHttpContext CreateHttpContext()
         {
-            return new DefaultHttpContext
+            var httpContext = new DefaultHttpContext
             {
-                ApplicationServices = this.ApplicationServices
+                RequestServices = this.ApplicationServices
             };
-        }
-
-        const string Req_IP = "128.0.0.1";
-        const string XForwardedForHeaderName = "X-Forwarded-For";
-
-        const string Req_ProtoValue = "FTP";
-        const string XForwardedProtoHeaderName = "X-Forwarded-Proto";
-
-        const string Req_ProtoAfterModified = "FTP-OVER-HTTP";        
-        const string XOriginalProtoName = "X-Original-Proto";
-
-
-        HttpContext GivenHttpContextFromIISPlatformHandler()
-        {
-            // IISPlatformHandlerMiddleware is used to restore the Headers marked(modified) by the IISPlatformHandler module
-            // see https://github.com/aspnet/IISIntegration/blob/2fe2e0d8418ff55612fc9001b7f7bde058ae5bb9/src/Microsoft.AspNet.IISPlatformHandler/IISPlatformHandlerMiddleware.cs
-
-            var httpContext = CreateHttpContext();
-            httpContext.Request.Headers.Add(XForwardedProtoHeaderName, Req_ProtoValue);
-            httpContext.Request.Headers.Add(XForwardedForHeaderName, Req_IP);
-
-            httpContext.Request.Scheme = Req_ProtoAfterModified;
-
+            httpContext.Features.Set<IHttpResponseFeature>(new DummyHttpResponseFeature());
             return httpContext;
         }
 
-        void AssertHttpContextAreProperlyRestored(HttpContext httpContext)
-        {
-            httpContext.Request.Scheme.ShouldEqual(Req_ProtoValue);
-            // httpContext.Request.Headers.ShouldContain(kvp => kvp.Key == XOriginalProtoName && kvp.Value == Req_ProtoAfterModified);
-
-            httpContext.Connection.RemoteIpAddress.ToString().ShouldEqual(Req_IP);
-        }
     }
 
 }

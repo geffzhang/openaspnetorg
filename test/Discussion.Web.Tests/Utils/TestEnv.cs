@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNet.Testing;
+﻿using Microsoft.AspNetCore.Testing;
 using Microsoft.Extensions.PlatformAbstractions;
 using System;
 using System.IO;
@@ -8,35 +8,53 @@ namespace Discussion.Web.Tests {
 
     public static class TestEnv
     {
-        public static string TestProjectPath()
+        public static string SolutionPath()
         {
-            // PlatformServices.Default.Application.ApplicationBasePath
+            const string testProjectSubPath = "test/Discussion.Web.Tests/project.json";
+            var currentPath = Directory.GetCurrentDirectory();
 
-            var args = Environment.GetCommandLineArgs();
-            var appBaseIndex = Array.IndexOf(args, "--appbase");
-
-            var path = appBaseIndex >= 0 ? args[appBaseIndex + 1] : Environment.CurrentDirectory;
-            return path.NormalizeToAbsolutePath();
-        }
-
-        public static string DnxPath()
-        {
-            var dnxCommand = TestPlatformHelper.IsWindows ? "dnx.exe" : "dnx";
-            var runtimeBin = PlatformServices.Default.Runtime.RuntimePath;
-
-            if (string.IsNullOrWhiteSpace(runtimeBin))
+            do
             {
-                throw new Exception("Runtime not detected on the machine.");
-            }
+                var testProjectPath = Path.Combine(currentPath, testProjectSubPath).NormalizeToAbsolutePath();
+                if (File.Exists(testProjectPath))
+                {
+                    return currentPath;
+                }
 
-            return Path.Combine(runtimeBin, dnxCommand).NormalizeToAbsolutePath();
+                var parent = Directory.GetParent(currentPath);
+                currentPath = parent == null ? null : parent.FullName;
+            } while (currentPath != null);
+
+            throw new InvalidOperationException("Cannot find test project.");
         }
 
         public static string WebProjectPath()
         {
-            return Path.Combine(TestProjectPath(), "../../src/Discussion.Web").NormalizeToAbsolutePath();
+            return Path.Combine(SolutionPath(), "src/Discussion.Web").NormalizeToAbsolutePath();
         }
 
+        public static string RuntimeLauncherPath()
+        {
+            var isWindows = PlatformServices.Default.Runtime.OperatingSystemPlatform == Platform.Windows;
+            var envVarSeparateChar = isWindows ? ';' : ':';
+            var commandName = isWindows ? "dotnet.exe" : "dotnet";
+
+            return FindFileThoughEnvironmentVariables(commandName, envVarSeparateChar);
+        }
+
+        private static string FindFileThoughEnvironmentVariables(string executableName, char envVarSeparateChar)
+        {
+            foreach (string envPath in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(envVarSeparateChar))
+            {
+                var path = envPath.Trim();
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path = Path.Combine(path, executableName)))
+                {
+                    return Path.GetFullPath(path);
+                }
+            }
+
+            throw new Exception("Runtime not detected on the machine.");
+        }
 
         private static string NormalizeToAbsolutePath(this string relativePath)
         {

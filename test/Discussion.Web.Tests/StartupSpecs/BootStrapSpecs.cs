@@ -1,9 +1,9 @@
 ﻿using System.Net;
 using System.Diagnostics;
-using System.IO;
 using Xunit;
 using System;
 using static Discussion.Web.Tests.TestEnv;
+using System.Text.RegularExpressions;
 
 namespace Discussion.Web.Tests.StartupSpecs
 {
@@ -12,17 +12,17 @@ namespace Discussion.Web.Tests.StartupSpecs
         [Fact]
         public void should_bootstrap_success()
         {
-            const int httpListenPort = 5000;
+            const int httpListenPort = 5001;
             var testCompleted = false;
             HttpWebResponse response = null;
 
-            StartWebApp(httpListenPort, (dnxWebServer) =>
+            StartWebApp(httpListenPort, (runningProcess) =>
             {
                 try
                 {
                     Console.WriteLine("Server started successfully, trying to request...");
                     var httpWebRequest = WebRequest.CreateHttp("http://localhost:" + httpListenPort.ToString());
-                    response = httpWebRequest.GetResponse() as HttpWebResponse;
+                    response = httpWebRequest.GetResponseAsync().Result as HttpWebResponse;
                 }
                 catch (WebException ex)
                 {
@@ -36,11 +36,13 @@ namespace Discussion.Web.Tests.StartupSpecs
                 finally
                 {
                     testCompleted = true;
-                    dnxWebServer.Kill();
+
+                    RunningDotnetProcess.TryKillProcess(runningProcess.WorkerProcessId);
+                    RunningDotnetProcess.TryKillProcess(runningProcess.HostProcessId);
                 }
             }, () => testCompleted);
-
-            if(response == null)
+            
+            if (response == null)
             {
                 Console.WriteLine("Error: Response object is not assigned.");
             }
@@ -48,29 +50,29 @@ namespace Discussion.Web.Tests.StartupSpecs
             response.StatusCode.ShouldEqual(HttpStatusCode.OK);
         }
 
-        private void StartWebApp(int port, Action<Process> onServerReady, Func<bool> testSuccessed)
+        private void StartWebApp(int port, Action<RunningDotnetProcess> onServerReady, Func<bool> testSuccessed)
         {
             var args = Environment.GetCommandLineArgs();
 
-            var dnxPath = DnxPath();
-            var appBaseIndex = Array.IndexOf(args, "--appbase");
+            var dotnetPath = RuntimeLauncherPath();
             var webProject = WebProjectPath();
 
-            var dnxWeb = new ProcessStartInfo
+            var dotnetProcess = new ProcessStartInfo
             {
-                FileName = dnxPath,
-                Arguments = "Microsoft.AspNet.Server.Kestrel --Hosting:Environment Integration --server.urls http://localhost:" + port.ToString(),
+                FileName = dotnetPath,
+                Arguments = "run --environment Integration --server.urls http://localhost:" + port.ToString(),
                 WorkingDirectory = webProject,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                LoadUserProfile = true,
+                // LoadUserProfile = true,   // will throw System.PlatformNotSupportedException : Operation is not supported on this platform.  see https://travis-ci.org/jijiechen/openaspnetorg/builds/140064540
                 UseShellExecute = false
             };
-            Console.WriteLine($"dnx command is: {dnxPath}{Environment.NewLine}\nStarting web site at: {webProject}");
+            dotnetProcess.Environment["DOTNET_CLI_CONTEXT_VERBOSE"] = "true";
+            Console.WriteLine($"dotnet command is: {dotnetPath}{Environment.NewLine}\nStarting web site at: {webProject}");
 
             string outputData = string.Empty, errorOutput = string.Empty;
             var startedSuccessfully = false;
-            var dnxWebServer = new Process { StartInfo = dnxWeb };
+            var dnxWebServer = new Process { StartInfo = dotnetProcess };
 
 
             dnxWebServer.OutputDataReceived += (object sender, DataReceivedEventArgs e) =>
@@ -84,7 +86,8 @@ namespace Discussion.Web.Tests.StartupSpecs
                 if (outputData.Contains("Now listening on") && outputData.Contains("Application started."))
                 {
                     startedSuccessfully = true;
-                    onServerReady.BeginInvoke(dnxWebServer, null, null);
+                    var workerProcessId = int.Parse(Regex.Match(outputData, @"Process ID: (\d+)").Groups[1].Value);
+                    onServerReady.Invoke(new RunningDotnetProcess { HostProcessId = dnxWebServer.Id, WorkerProcessId = workerProcessId });
                 };
             };
             dnxWebServer.ErrorDataReceived += (object sender, DataReceivedEventArgs e) =>
@@ -109,4 +112,49 @@ namespace Discussion.Web.Tests.StartupSpecs
             dnxWebServer.WaitForExit(20 * 1000);
         }
     }
+
+
+
+    class RunningDotnetProcess
+    {
+        public int HostProcessId { get; set; }
+        public int WorkerProcessId { get; set; }
+
+
+        public static Process GetProcess(int id)
+        {
+            try
+            {
+                return Process.GetProcessById(id);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+
+        public static void TryKillProcess(int id)
+        {
+            var process = GetProcess(id);
+            if (process != null)
+            {
+                try
+                {
+                    process.Kill();
+                }
+                catch
+                {
+                    
+                }
+
+                //process = GetProcess(id);
+                //if(process != null)
+                //{
+                //    // did not kill
+                //}
+            }            
+        }
+    }
+
 }

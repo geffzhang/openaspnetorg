@@ -1,7 +1,6 @@
-﻿using Discussion.Web.Models;
-using Microsoft.AspNet.Diagnostics;
-using Microsoft.AspNet.Http;
-using Microsoft.AspNet.Mvc;
+﻿using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using System.Net;
 using System.Threading.Tasks;
 
@@ -24,14 +23,11 @@ namespace Discussion.Web.Controllers
         //}
 
 
-
         [Route("/About")]
-        public  ActionResult About()
+        public ActionResult About()
         {
             return View();
         }
-
-
 
         [Route("/Error")]
         public async Task<IActionResult> Error()
@@ -41,7 +37,7 @@ namespace Discussion.Web.Controllers
             Response.StatusCode = (int)HttpStatusCode.InternalServerError;
             return View();
         }
-
+        
         async Task DiagnosticExceptionDetails()
         {
             return;

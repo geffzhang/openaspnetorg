@@ -1,19 +1,18 @@
-﻿using Discussion.Web.Data;
-using Discussion.Web.Data.InMemory;
+﻿using Discussion.Web.Data.InMemory;
+using Discussion.Web.Data;
 using Jusfr.Persistent;
-using Jusfr.Persistent.Mongo;
-using Microsoft.AspNet.Builder;
-using Microsoft.AspNet.FileProviders;
-using Microsoft.AspNet.Hosting;
-using Microsoft.AspNet.Mvc.Razor;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.PlatformAbstractions;
-using Microsoft.Extensions.Primitives;
-using Microsoft.Extensions.WebEncoders;
+using Raven.Client;
+using Raven.Client.Document;
 using System;
 using System.IO;
+using System.Linq;
+using Microsoft.AspNetCore.Http;
+using Discussion.Web.Controllers;
 
 namespace Discussion.Web
 {
@@ -21,51 +20,44 @@ namespace Discussion.Web
     {
         public IConfigurationRoot Configuration { get;  }
         public IHostingEnvironment HostingEnvironment { get;  }
-        public IApplicationEnvironment ApplicationEnvironment { get;  }
 
-        public Startup(IHostingEnvironment env, IApplicationEnvironment appEnv)
+        public Startup(IHostingEnvironment env)
         {
             HostingEnvironment = env;
-            ApplicationEnvironment = appEnv;
-            Configuration = BuildConfiguration(env, appEnv);
+            Configuration = BuildApplicationConfiguration(env.ContentRootPath, env.EnvironmentName).Build();
         }
 
+        public static void Main(string[] args)
+        {
+            var hostBuilder = new WebHostBuilder();
+            ConfigureHost(hostBuilder, addCommandLineArguments: true);
 
+            var host = hostBuilder.Build();
+            host.Run();
+        }
+
+        public static IWebHostBuilder ConfigureHost(IWebHostBuilder hostBuilder, bool addCommandLineArguments = false)
+        {
+            var basePath = Directory.GetCurrentDirectory();
+            var configBuilder = BuildHostingConfiguration(basePath, addCommandLineArguments ? Environment.GetCommandLineArgs() : null);
+            var configuration = configBuilder.Build();
+
+            return hostBuilder.UseContentRoot(basePath)
+                 .UseIISIntegration()
+                .UseKestrel()
+                .UseStartup<Startup>()
+                .UseConfiguration(configuration);
+        }
+
+        // ConfigureServices is invoked before Configure
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddLogging();
-            // Configure runtime to enable specified characters to be rendered as is
-            // See https://github.com/aspnet/HttpAbstractions/issues/315
-            services.AddWebEncoders(option =>
-            {
-                var enabledChars = new[]
-                {
-                    UnicodeRanges.BasicLatin,
-                    UnicodeRanges.Latin1Supplement,
-                    UnicodeRanges.CJKUnifiedIdeographs,
-                    UnicodeRanges.HalfwidthandFullwidthForms,
-                    UnicodeRanges.LatinExtendedAdditional,
-                    UnicodeRanges.LatinExtendedA,
-                    UnicodeRanges.LatinExtendedB,
-                    UnicodeRanges.LatinExtendedC,
-                    UnicodeRanges.LatinExtendedD,
-                    UnicodeRanges.LatinExtendedE
-                };
-
-                option.CodePointFilter = new CodePointFilter(enabledChars);
-            });
-            
             services.AddMvc();
             AddDataServicesTo(services, Configuration);
-
-
-            if (IsMono())
-            {
-                Console.WriteLine("Replaced default FileProvider with a wrapped synchronous one\n Since Mono has a bug on asynchronous filestream.\n See https://github.com/aspnet/Hosting/issues/604");
-                UseSynchronousFileProvider(services, ApplicationEnvironment);
-            }
+            services.AddSingleton<IConfigurationRoot>(this.Configuration);
+            services.AddAuthorization();
         }
-
 
         public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
         {
@@ -78,182 +70,102 @@ namespace Discussion.Web
                 app.UseExceptionHandler("/error");
             }
 
-            // Add the platform handler to the request pipeline.
-            app.UseIISPlatformHandler();
+            app.UseCookieAuthentication(new CookieAuthenticationOptions()
+            {
+                AuthenticationScheme = "Cookie",
+                LoginPath = new PathString("/signin"),
+                AccessDeniedPath = new PathString("/access-denied"),
+                AutomaticAuthenticate = true,
+                AutomaticChallenge = true
+            });
+            app.Use((httpContext, next) =>
+            {
+                httpContext.AssignDiscussionPrincipal();
+                return next();
+            });
             app.UseStaticFiles();
             app.UseMvc();
+
+
+            var ravenStore = app.ApplicationServices.GetService<Lazy<IDocumentStore>>();
+            if (ravenStore != null)
+            {
+                var lifetime = app.ApplicationServices.GetService<IApplicationLifetime>();
+                lifetime.ApplicationStopping.Register(() =>
+                {
+                    if (ravenStore.IsValueCreated && !ravenStore.Value.WasDisposed)
+                    {
+                        ravenStore.Value.Dispose();
+                    }
+                });
+            }
         }
 
-
-        static IConfigurationRoot BuildConfiguration(IHostingEnvironment env, IApplicationEnvironment appEnv)
+        static IConfigurationBuilder BuildApplicationConfiguration(string basePath, string envName)
         {
             var builder = new ConfigurationBuilder()
-              .SetBasePath(appEnv.ApplicationBasePath)
-              .AddJsonFile("appsettings.json", optional: true)
-              .AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true);
+                              .AddEnvironmentVariables(prefix: "OPENASPNETORG_")
+                              .SetBasePath(basePath)
+                              .AddJsonFile("appsettings.json", optional: true)
+                              .AddJsonFile($"appsettings.{envName}.json", optional: true);
 
-            builder.AddEnvironmentVariables();
-            return builder.Build();
+            return builder;
         }
 
-        static void AddDataServicesTo(IServiceCollection services, IConfigurationRoot _configuration)
+        static IConfigurationBuilder BuildHostingConfiguration(string basePath, string[] commandlineArgs = null)
         {
-            var mongoConnectionString = _configuration["mongoConnectionString"];
-            var hasMongoCongured = !string.IsNullOrWhiteSpace(mongoConnectionString);
+            var builder = new ConfigurationBuilder()
+                              .AddEnvironmentVariables(prefix: "ASPNETCORE_")
+                              .SetBasePath(basePath)
+                              .AddJsonFile("hosting.json", optional: true);
 
-
-            if (hasMongoCongured)
+            if (commandlineArgs != null)
             {
-                services.AddScoped(typeof(IRepositoryContext), (serviceProvider) =>
+                var args = Environment.GetCommandLineArgs();
+                var firstArgs = args.FirstOrDefault(arg => arg.StartsWith("--"));
+                var argsIndex = Array.IndexOf(args, firstArgs);
+
+                if (argsIndex > -1)
                 {
-                // @jijiechen: detect at every time initate a new IRepositoryContext
-                // may cause a performance issue
-                if (!MongoDbUtils.DatabaseExists(mongoConnectionString))
+                    var usefulArgs = args.Skip(argsIndex).ToArray();
+                    builder.AddCommandLine(usefulArgs);
+                }
+            }
+
+            return builder;
+        }
+
+        static void AddDataServicesTo(IServiceCollection services, IConfiguration _configuration)
+        {
+            var ravenConnectionString = _configuration["ravenConnectionString"];
+
+            if (!string.IsNullOrWhiteSpace(ravenConnectionString)) {
+
+                services.AddSingleton(new Lazy<IDocumentStore>(() =>
+                {
+                    var store = new DocumentStore();
+                    store.ParseConnectionString(ravenConnectionString);
+                    store.Initialize();
+
+                    return store;
+                }));
+
+                services.AddScoped(typeof(IRepositoryContext), (serviceProvider) => {
+                    return new RavenRepositoryContext(() =>
                     {
-                        throw new ApplicationException("Could not find a database using specified connection string");
-                    }
-
-                    return new MongoRepositoryContext(mongoConnectionString);
+                        return serviceProvider.GetService<Lazy<IDocumentStore>>().Value;
+                    });
                 });
-                services.AddScoped(typeof(Repository<,>), typeof(MongoRepository<,>));
-            }
-            else
-            {
-                var dataContext = new InMemoryResponsitoryContext();
-                services.AddScoped(typeof(IRepositoryContext), (serviceProvider) => dataContext);
-                services.AddScoped(typeof(Repository<,>), typeof(InMemoryDataRepository<,>));
+                services.AddScoped(typeof(Repository<>), typeof(RavenDataRepository<>));
+                services.AddScoped(typeof(IRepository<>), typeof(RavenDataRepository<>));
+                
+                return;
             }
 
-            services.AddScoped(typeof(IDataRepository<>), typeof(BaseDataRepository<>));
-        }
-
-        static void UseSynchronousFileProvider(IServiceCollection services, IApplicationEnvironment appEnv)
-        {
-            services.Configure<RazorViewEngineOptions>(opt =>
-            {
-                var physicalFileProvider = new PhysicalFileProvider(appEnv.ApplicationBasePath);
-                opt.FileProvider = new WrappedSynchronousFileProvider(physicalFileProvider);
-            });
-        }
-
-        static bool IsMono()
-        {
-            var runtime = PlatformServices.Default.Runtime;
-            return runtime.RuntimeType.Equals("Mono", StringComparison.OrdinalIgnoreCase);
+            var dataContext = new InMemoryResponsitoryContext();
+            services.AddSingleton(typeof(IRepositoryContext), (serviceProvider) => dataContext);
+            services.AddScoped(typeof(Repository<>), typeof(InMemoryDataRepository<>));
+            services.AddScoped(typeof(IRepository<>), typeof(InMemoryDataRepository<>));
         }
     }
-
-    public class WrappedSynchronousFileProvider : IFileProvider
-    {
-        IFileProvider _original;
-        public WrappedSynchronousFileProvider(IFileProvider original)
-        {
-            _original = original;
-        }
-
-
-        public IDirectoryContents GetDirectoryContents(string subpath)
-        {
-            return _original.GetDirectoryContents(subpath);
-        }
-
-        public IFileInfo GetFileInfo(string subpath)
-        {
-            var originalFileInfo = _original.GetFileInfo(subpath);
-            var isPhysical = originalFileInfo.GetType().FullName.EndsWith("PhysicalFileInfo");
-            if (!isPhysical)
-            {
-                return originalFileInfo;
-            }
-
-            return new WrappedSynchronousFileInfo(originalFileInfo);
-        }
-
-        public IChangeToken Watch(string filter)
-        {
-            return _original.Watch(filter);
-        }
-
-
-        public class WrappedSynchronousFileInfo : IFileInfo
-        {
-            IFileInfo _original;
-            public WrappedSynchronousFileInfo(IFileInfo original)
-            {
-                _original = original;
-            }
-
-
-            public bool Exists
-            {
-                get
-                {
-                    return _original.Exists;
-                }
-            }
-
-            public bool IsDirectory
-            {
-                get
-                {
-                    return _original.IsDirectory;
-                }
-            }
-
-            public DateTimeOffset LastModified
-            {
-                get
-                {
-                    return _original.LastModified;
-                }
-            }
-
-            public long Length
-            {
-                get
-                {
-                    return _original.Length;
-                }
-            }
-
-            public string Name
-            {
-                get
-                {
-                    return _original.Name;
-                }
-            }
-
-            public string PhysicalPath
-            {
-                get
-                {
-                    return _original.PhysicalPath;
-                }
-            }
-
-            public Stream CreateReadStream()
-            {
-                // @jijiechen: replaced implemention from https://github.com/aspnet/FileSystem/blob/32822deef3fd59b848842a500a3e989182687318/src/Microsoft.Extensions.FileProviders.Physical/PhysicalFileInfo.cs#L30
-                //return new FileStream(
-                //    PhysicalPath,
-                //    FileMode.Open,
-                //    FileAccess.Read,
-                //    FileShare.ReadWrite,
-                //    1024 * 64,
-                //    FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-
-                // Note: Buffer size must be greater than zero, even if the file size is zero.
-                return new FileStream(
-                   PhysicalPath,
-                   FileMode.Open,
-                   FileAccess.Read,
-                   FileShare.ReadWrite,
-                   1024 * 64,
-                   FileOptions.SequentialScan);
-            }
-        }
-    }
-
 }
