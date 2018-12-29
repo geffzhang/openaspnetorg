@@ -1,60 +1,64 @@
-﻿using Discussion.Web.Models;
-using Microsoft.AspNetCore.Mvc;
-using System.Linq;
+﻿using Microsoft.AspNetCore.Mvc;
 using Discussion.Web.ViewModels;
-using System;
-using Discussion.Web.Services;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Jusfr.Persistent;
 using Microsoft.AspNetCore.Authorization;
+using System.Linq;
+using Discussion.Core.Data;
+using Discussion.Core.Logging;
+using Discussion.Core.Models;
+using Discussion.Core.Mvc;
+using Discussion.Core.Pagination;
+using Discussion.Web.Services.TopicManagement;
+using Discussion.Web.Services.UserManagement.Exceptions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Discussion.Web.Controllers
 {
     public class TopicController : Controller
     {
-
+        private const int PageSize = 20;
         private readonly IRepository<Topic> _topicRepo;
-        private readonly IModelMetadataProvider _modelMetadataProvider;
-        public TopicController(IRepository<Topic> topicRepo, IModelMetadataProvider modelMetadataProvider)
+        private readonly ITopicService _topicService;
+        private readonly ILogger<TopicController> _logger;
+
+        public TopicController(IRepository<Topic> topicRepo, ITopicService topicService, ILogger<TopicController> logger)
         {
             _topicRepo = topicRepo;
-            _modelMetadataProvider = modelMetadataProvider;
+            _topicService = topicService;
+            _logger = logger;
         }
-        
-        [Route("/Topic/{id}")]
+
+
+        [HttpGet]
+        [Route("/")]
+        [Route("/topics")]
+        public ActionResult List([FromQuery]int? page = null)
+        {
+            var pagedTopics = _topicRepo.All()
+                                        .Include(t => t.Author)
+                                            .ThenInclude(u => u.AvatarFile)
+                                        .Include(t => t.LastRepliedUser)
+                                            .ThenInclude(u => u.AvatarFile)
+                                        .OrderByDescending(topic => topic.CreatedAtUtc)
+                                        .Page(PageSize, page);
+
+            return View(pagedTopics);
+        }
+
+        [Route("/topics/{id}")]
         public ActionResult Index(int id)
         {
-            var topic = _topicRepo.Retrive(id);
-            if(topic == null)
+            var showModel = _topicService.ViewTopic(id);
+            if (showModel == null)
             {
                 return NotFound();
             }
 
-            var markdownRenderer = new MarkdownRenderService();
-            var showModel = new TopicShowModel
-            {
-                Id = topic.Id,
-                Title = topic.Title,
-                MarkdownContent = topic.Content,
-                HtmlContent = markdownRenderer.RenderMarkdownAsHtml(topic.Content)
-            };
-
             return View(showModel);
         }
 
-
-        [Route("/")]
-        [Route("/Topic/List")]
-        public ActionResult List()
-        {
-            var topicList = _topicRepo.All.ToList();
-
-            return View(topicList);
-        }
-
-
         [Authorize]
-        [Route("/Topic/Create")]
+        [Route("/topics/create")]
         public ActionResult Create()
         {
             return View();
@@ -62,25 +66,27 @@ namespace Discussion.Web.Controllers
 
         [Authorize]
         [HttpPost]
-        [Route("/Topic/CreateTopic")]
+        [Route("/topics")]
         public ActionResult CreateTopic(TopicCreationModel model)
         {
+            var userName = HttpContext.DiscussionUser().UserName;
             if (!ModelState.IsValid)
             {
+                _logger.LogModelState("创建话题", ModelState, userName);
                 return BadRequest();
             }
 
-            var topic = new Topic
+            try
             {
-                Title = model.Title,
-                Content = model.Content,
-                TopicType = TopicType.Sharing,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            _topicRepo.Create(topic);
-            return RedirectToAction("Index", new { topic.Id });
+                var topic = _topicService.CreateTopic(model);
+                _logger.LogInformation($"创建话题成功：{userName}：{topic.Title}(id: {topic.Id})");
+                return RedirectToAction("Index", new { topic.Id });
+            }
+            catch (UserVerificationRequiredException ex)
+            {
+                _logger.LogWarning($"创建话题失败：{userName}：{ex.Message}");
+                return BadRequest();
+            }
         }
     }
-
 }

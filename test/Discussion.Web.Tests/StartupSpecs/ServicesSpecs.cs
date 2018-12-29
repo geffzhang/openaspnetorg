@@ -1,20 +1,32 @@
-﻿using Discussion.Web.Models;
-using Discussion.Web.Data.InMemory;
-using Jusfr.Persistent;
-using Microsoft.AspNetCore.Hosting;
+﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using Discussion.Core.Data;
+using Discussion.Core.Models;
+using Discussion.Tests.Common;
+using Discussion.Tests.Common.AssertionExtensions;
+using Discussion.Web.Resources;
+using Discussion.Web.Services.UserManagement.Identity;
+using Discussion.Web.Tests.Specs.Resources;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Xunit;
 using Microsoft.Extensions.Configuration;
-using Discussion.Web.Data;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions.Internal;
+using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
 
 namespace Discussion.Web.Tests.StartupSpecs
 {
     public class ServicesSpecs
     {
         [Fact]
-        public void should_add_mvc_service()
+        public void should_add_mvc_services()
         {
             // arrage
             IServiceCollection services = null;
@@ -33,28 +45,10 @@ namespace Discussion.Web.Tests.StartupSpecs
             services.ShouldContain(x => x.ServiceType.ToString().EndsWith("MvcMarkerService"));
         }
 
-
         [Fact]
-        public void should_add_ravendb_reposotiry()
+        public void should_use_ef_repository()
         {
             // arrange
-            var applicationServices = CreateApplicationServices((configuration) => {
-                configuration["ravenConnectionString"] = "Url=http://ravendb.mydomain.com;Database=Northwind";
-            }, s => { });
-
-            // act
-            var repo = applicationServices.GetRequiredService<Repository<Article>>();
-
-            // assert
-            repo.ShouldNotBeNull();
-            repo.GetType().GetGenericTypeDefinition().ShouldEqual(typeof(RavenDataRepository<>));
-        }
-
-
-        [Fact]
-        public void should_add_base_implemention_for_repository()
-        {
-            // arrage
             var applicationServices = CreateApplicationServices();
 
             // act
@@ -62,32 +56,62 @@ namespace Discussion.Web.Tests.StartupSpecs
 
             // assert
             repo.ShouldNotBeNull();
-            repo.GetType().ShouldEqual(typeof(InMemoryDataRepository<Article>));
+            repo.GetType().GetGenericTypeDefinition().ShouldEqual(typeof(EfRepository<>));
+        }
+        
+        [Fact]
+        public void should_add_identity_services()
+        {
+            var applicationServices = CreateApplicationServices();
+
+            var userManager = applicationServices.GetRequiredService<UserManager<User>>();
+            var errorDescriber = applicationServices.GetRequiredService<IdentityErrorDescriber>();
+
+            Assert.IsType<EmailAddressAwareUserManager<User>>(userManager);
+            Assert.IsType<ResourceBasedIdentityErrorDescriber>(errorDescriber);
+        }
+        
+        [Fact]
+        public void should_use_translated_model_binding_messages()
+        {
+            var applicationServices = CreateApplicationServices();
+
+            var options = applicationServices.GetRequiredService<IOptions<MvcOptions>>().Value;
+
+            var methodType = options.ModelBindingMessageProvider.ValueIsInvalidAccessor.Method.DeclaringType;
+            var containingType = methodType.ReflectedType;
+            Assert.Equal(typeof(ResourceModelBindingMessageExtensions), containingType);
         }
 
-        public static IServiceProvider CreateApplicationServices()
+        static IServiceProvider CreateApplicationServices()
         {
             return CreateApplicationServices(c => { },  s => { });
         }
 
-        public static IServiceProvider CreateApplicationServices(Action<IConfigurationRoot> configureSettings, Action<IServiceCollection> configureServices) {
+        static IServiceProvider CreateApplicationServices(Action<Mock<IConfiguration>> configureSettings, Action<IServiceCollection> configureServices) {
             var services = new ServiceCollection();
-            var startup = CreateMockStartup();
-            configureSettings(startup.Configuration);
-
+            var startup = CreateMockStartup(configureSettings);
+            services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
             startup.ConfigureServices(services);
             configureServices(services);
 
             return services.BuildServiceProvider();
         }
 
-        public static Startup CreateMockStartup()
+        private static Startup CreateMockStartup(Action<Mock<IConfiguration>> configureSettings)
         {
             var hostingEnv = new Mock<IHostingEnvironment>();
             hostingEnv.SetupGet(e => e.EnvironmentName).Returns("UnitTest");
             hostingEnv.SetupGet(e => e.ContentRootPath).Returns(TestEnv.WebProjectPath());
 
-            return new Startup(hostingEnv.Object);
+            var appConfig = new Mock<IConfiguration>();
+            appConfig.SetupGet(e => e[It.IsAny<string>()]).Returns((string)null);
+            configureSettings(appConfig);
+
+            var loggerFactory = new Mock<ILoggerFactory>();
+            loggerFactory.Setup(f => f.CreateLogger(TypeNameHelper.GetTypeDisplayName(typeof(Startup)))).Returns(NullLogger.Instance);
+                
+            return new Startup(hostingEnv.Object, appConfig.Object, loggerFactory.Object);
         }
 
     }

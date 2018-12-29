@@ -1,56 +1,37 @@
-﻿using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using System.Net;
-using System.Threading.Tasks;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace Discussion.Web.Controllers
 {
     public class HomeController: Controller
     {
-        // IRepository<Article, Article> 
+        private readonly ILogger<HomeController> _logger;
 
-        public HomeController()
+        public HomeController(ILogger<HomeController> logger)
         {
-
+            _logger = logger;
         }
 
-        // Use Topic/List to host home page.
-        //[Route("/")]
-        //public ActionResult Index()
-        //{
-        //    return View();
-        //}
 
-
-        [Route("/About")]
+        [Route("/about")]
         public ActionResult About()
         {
             return View();
         }
 
-        [Route("/Error")]
-        public async Task<IActionResult> Error()
+        [Route("/error")]
+        public IActionResult Error()
         {
-            await DiagnosticExceptionDetails();
-
+            var exceptionFeature = HttpContext.Features.Get<IExceptionHandlerFeature>();
+            if(exceptionFeature != null && exceptionFeature.Error != null)
+            { 
+                _logger.LogError(exceptionFeature.Error, "服务器错误");
+            }
+            
             Response.StatusCode = (int)HttpStatusCode.InternalServerError;
             return View();
-        }
-        
-        async Task DiagnosticExceptionDetails()
-        {
-            return;
-
-            var errorHandler = HttpContext.Features[typeof(IExceptionHandlerFeature)] as IExceptionHandlerFeature;
-            if(errorHandler == null)
-            {
-                return;
-            }
-
-            var error = errorHandler.Error;
-            await Response.WriteAsync(error.Message);
-            await Response.WriteAsync(error.StackTrace);
         }
     }
 }

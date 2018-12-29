@@ -1,7 +1,10 @@
 language: csharp
-sudo: required
-dist: trusty
+matrix:
+  include:
+    - os: linux
+      dist: trusty
 addons:
+  chrome: stable
   apt:
     packages:
     - gettext
@@ -10,15 +13,33 @@ addons:
     - libssl-dev
     - libunwind8
     - zlib1g
-mono:
-  - 4.2.1
-os:
-  - linux
+
+mono: 5.4.1
+dotnet: 2.1.300
+services:
+  - docker
+
+install:
+  - nvm install 8.12.0
+  - nvm use 8.12.0
+  - yarn
+
 branches:
   only:
     - master
     - dev
+    
 script:
-  - ./build.sh --quiet build-all
-env:
-  - KOREBUILD_TEST_SKIPMONO=1
+  - tag=`date -u +%Y%m%d%H%M` ; export imagetag="jijiechen/dotnetclub:$tag"
+  - ./build-linux.sh --target=ci --imagetag="$imagetag"
+  - if [ "$TRAVIS_BRANCH" == "master" ] && [ "$DOCKER_USERNAME" != "" ]; then docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD && docker push $imagetag ; fi
+
+after_success:
+  - ./codecov -f "./test/Discussion.Web.Tests/coverage.opencover.xml" -t $CODECOV_TOKEN
+  - ./codecov -f "./test/Discussion.Admin.Tests/coverage.opencover.xml" -t $CODECOV_TOKEN
+  - ./codecov -f "./src/Discussion.Admin/ClientApp/coverage/lcov.info" -t $CODECOV_TOKEN
+
+cache:
+  yarn: true
+  directories:
+  - /home/travis/.nuget/packages

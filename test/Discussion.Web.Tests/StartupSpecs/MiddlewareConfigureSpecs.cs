@@ -2,40 +2,50 @@
 using Xunit;
 using Microsoft.AspNetCore.Http;
 using System;
-using Microsoft.Extensions.Logging;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http.Features;
 using System.Threading.Tasks;
+using Discussion.Core.Communication.Sms;
+using Discussion.Core.FileSystem;
+using Discussion.Tests.Common;
+using Discussion.Tests.Common.AssertionExtensions;
+using Microsoft.AspNetCore.TestHost;
+using Moq;
 
 namespace Discussion.Web.Tests.StartupSpecs
 {
-    [Collection("AppSpecs")]
+    [Collection("WebSpecs")]
     public class MiddlewareConfigureSpecs
     {
 
-        private RequestDelegate RequestHandler;
-        private IServiceProvider ApplicationServices;
-        public MiddlewareConfigureSpecs(Application app)
+        private readonly TestServer server;
+        private readonly TestDiscussionWebApp _app;
+        public MiddlewareConfigureSpecs(TestDiscussionWebApp app)
         {
-            RequestHandler = app.RequestHandler;
-            ApplicationServices = app.ApplicationServices;
+            this._app = app;
+            server = app.Server;
         }
 
 
         [Fact]
         public void should_use_iis_platform()
         {
-            var app = Application.BuildApplication("Dev", host =>
+            var app = TestDiscussionWebApp.BuildTestApplication<Startup>(new TestDiscussionWebApp(initialize: false), "UnitTest", host =>
             {
                 host.UseSetting("PORT", "5000");
                 host.UseSetting("APPL_PATH", "/");
                 host.UseSetting("TOKEN", "dummy-token");
             });
 
-            var iisFilter = app.ApplicationServices.GetRequiredService<IStartupFilter>();
+            var filters = app.Server.Host
+                .Services
+                .GetServices<IStartupFilter>()
+                .ToList();
 
-            var filterName = iisFilter.GetType().FullName;
-            filterName.Contains("IISSetupFilter").ShouldEqual(true);
+            filters.ShouldContain(f => f.GetType().FullName.Contains("IISSetupFilter"));
 
             (app as IDisposable).Dispose();
         }
@@ -43,42 +53,50 @@ namespace Discussion.Web.Tests.StartupSpecs
         [Fact]
         public async Task should_use_mvc()
         {
-            var httpContext = CreateHttpContext();
-            httpContext.Request.Path = IntegrationTests.NotFoundSpecs.NotFoundPath;
+            HttpContext httpContext = null;
+            await server.SendAsync(ctx =>
+            {
+                httpContext = ctx;
+                ctx.Request.Path = "/";
+            });
+            
 
-            await RequestHandler.Invoke(httpContext);
-
-            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>() as StubLoggerFactory;
-            loggerFactory.ShouldNotBeNull();
-            loggerFactory.LogItems.ShouldContain(item => item.Message.Equals("Request did not match any routes."));
+            var logs = _app.GetLogs();
+            logs.ShouldNotBeNull();
+            logs.ShouldContain(item => item.Category.StartsWith("Microsoft.AspNetCore.Mvc"));
         }
 
         [Fact]
         public async Task should_use_static_files()
         {
             var staticFile = IntegrationTests.NotFoundSpecs.NotFoundStaticFile;
-            var httpContext = CreateHttpContext();
-            httpContext.Request.Method = "GET";
-            httpContext.Request.Path = staticFile;
-
-            await RequestHandler.Invoke(httpContext);
-
-            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>() as StubLoggerFactory;
-            loggerFactory.ShouldNotBeNull();
-            loggerFactory.LogItems.ShouldContain(item => item.Message.Equals($"The request path {staticFile} does not match an existing file"));
-        }
-        
-        
-        private DefaultHttpContext CreateHttpContext()
-        {
-            var httpContext = new DefaultHttpContext
+            HttpContext httpContext = null;
+            
+            await server.SendAsync(ctx =>
             {
-                RequestServices = this.ApplicationServices
-            };
-            httpContext.Features.Set<IHttpResponseFeature>(new DummyHttpResponseFeature());
-            return httpContext;
-        }
+                httpContext = ctx;
+                ctx.Request.Method = "GET";
+                ctx.Request.Path = staticFile;
+            });
 
+            var logs = _app.GetLogs();
+            logs.ShouldNotBeNull();
+            logs.ShouldContain(item => item.Category.StartsWith("Microsoft.AspNetCore.StaticFiles"));
+        }
+        
+        
+        [Fact]
+        public void should_use_temporary_database_when_no_database_connection_string_specified()
+        {
+            var app = TestDiscussionWebApp.BuildTestApplication<Startup>(new TestDiscussionWebApp(initialize: false), "UnitTest");
+
+            var logs = app.GetLogs();
+            
+            logs.ShouldNotBeNull();
+            logs.ShouldContain(item => item.Message.Contains("数据库结构创建完成"));
+            
+            (app as IDisposable).Dispose();
+        }
     }
 
 }

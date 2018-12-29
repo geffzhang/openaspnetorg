@@ -1,0 +1,61 @@
+﻿@model Discussion.Core.ViewModels.UserViewModel
+@{
+    ViewData["Title"] = "用户注册";
+}
+
+
+<div class="row">
+    <div class="panel no-padding panel-topic-list col-xs-12 col-sm-12 col-md-12 col-lg-12">
+        <div class="panel-heading">
+            用户注册
+        </div>
+
+        <div class="panel-body">
+            <div asp-validation-summary="All" class="text-danger"></div>
+            <form class="register-form login-form"
+                  asp-controller="Account" asp-action="DoRegister" 
+                  method="post">
+                <fieldset>
+                    <label>
+                        <span>@Html.DisplayNameFor(m => m.UserName)</span>
+                        @Html.TextBoxFor(m => m.UserName, new {autofocus = "true", autocomplete = "off", maxlength=20})
+                    </label>
+                </fieldset>
+                <fieldset>
+                    <label>
+                        <span>@Html.DisplayNameFor(m => m.Password)</span>
+                        @Html.PasswordFor(m => m.Password, new {autocomplete = "off", maxlength=20})
+                    </label>
+                </fieldset>
+                <fieldset>
+                    <label>
+                        <span>确认密码</span>
+                        <input id="Password-Confirmation" type="password" class="password-confirmation" autocomplete="false" maxlength="20"/>
+                    </label>
+                </fieldset>
+                <br/>
+                <button class="btn btn-default signin-button">
+                    <span class="glyphicon glyphicon-user">注册</span>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Tail{
+    <script>
+        $('.register-form').on('submit',
+            function() {
+                var password = $("#Password").val();
+                var confirmBox = $("#Password-Confirmation");
+                var confirm = confirmBox.val();
+
+                if (password && (confirm !== password)) {
+                    alert('两次输入的密码不一致，请确认。');
+                    confirmBox[0].select();
+                    confirmBox[0].focus();
+                    return false;
+                }
+            });
+    </script>
+}

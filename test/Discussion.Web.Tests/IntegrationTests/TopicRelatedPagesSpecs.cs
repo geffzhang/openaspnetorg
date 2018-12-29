@@ -1,115 +1,111 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Net.Http;
-using System.Security.Claims;
-using System.Threading.Tasks;
+using Discussion.Tests.Common;
+using Discussion.Tests.Common.AssertionExtensions;
 using Xunit;
+using static Discussion.Tests.Common.SigninRequirement;
 
 namespace Discussion.Web.Tests.IntegrationTests
 {
-    [Collection("AppSpecs")]
+    [Collection("WebSpecs")]
     public class TopicRelatedPagesSpecs
     {
         
-        private Application _theApp;
-        public TopicRelatedPagesSpecs(Application theApp)
+        private readonly TestDiscussionWebApp _app;
+        public TopicRelatedPagesSpecs(TestDiscussionWebApp app)
         {
-            _theApp = theApp.Reset();
+            _app = app.Reset();
         }
 
         [Fact]
-        public async Task should_serve_topic_list_page()
+        public void should_serve_topic_list_page()
         {
-            // arrange
-            var request = _theApp.Server.CreateRequest("/topic/list");
-
-            // act
-            var response = await request.GetAsync();
-
-            // assert
-            response.StatusCode.ShouldEqual(HttpStatusCode.OK);
+            _app.ShouldGet("/topics", 
+                SigninNotRequired, 
+                responseShouldContain: "全部话题");
         }
 
-
         [Fact]
-        public async Task should_serve_create_topic_page()
+        public void should_serve_create_topic_page()
         {
-            // arrange
-            var request = _theApp.Server.CreateRequest("/topic/create");
-            MockUser();
-            // act
-            var response = await request.GetAsync();
-
-            // assert
-            response.StatusCode.ShouldEqual(HttpStatusCode.OK);
+            _app.ShouldGet("/topics/create", 
+                SigninRequired, 
+                responseShouldContain: "创建新话题");
         }
 
-
         [Fact]
-        public async Task should_redirect_to_signin_when_access_create_topic_page_without_user_principal()
+        public void should_accept_create_topic_request_with_valid_post_data()
         {
-            // arrange
-            var request = _theApp.Server.CreateRequest("/topic/create");
-
-            // act
-            var response = await request.GetAsync();
-
-            // assert
-            response.StatusCode.ShouldEqual(HttpStatusCode.Redirect);
-            response.Headers.Location.ToString().Contains("signin").ShouldEqual(true);
-        }
-
-
-        [Fact]
-        public async Task should_accept_create_topic_request_with_valid_post_data()
-        {
-            // arrange
-            var request = _theApp.Server.CreateRequest("/topic/createtopic");
-            MockUser();
-
-            request.And(req =>
-            {
-                req.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            _app.ShouldPost("/topics", 
+                new
                 {
-                    {"title", "中文的 title" },
-                    {"content", "some content" },
+                    title = "中文的 title",
+                    content = "some content",
+                    type = "1"
+                },
+                SigninRequired)
+                .WithResponse(res =>
+                {
+                    res.StatusCode.ShouldEqual(HttpStatusCode.Redirect);
+                    res.Headers.Location.ShouldNotBeNull();
+                    res.Headers.Location.ToString().ShouldContain("/topics/", StringComparison.OrdinalIgnoreCase);
                 });
-            });
-
-            // act
-            var response = await request.PostAsync();
-
-            // assert
-            response.StatusCode.ShouldEqual(HttpStatusCode.Redirect);
-            response.Headers.Location.ShouldNotBeNull();
-            response.Headers.Location.ToString().ShouldContain("/Topic/", StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
-        public async Task should_not_accept_create_topic_request_with_invalid_post_data()
+        public void should_not_accept_create_topic_request_with_invalid_post_data()
         {
-            // arrange
-            var request = _theApp.Server.CreateRequest("/topic/createtopic");
-            MockUser();
-
-            // act
-            var response = await request.PostAsync();
-
-            // assert
-            response.StatusCode.ShouldEqual(HttpStatusCode.BadRequest);
+            _app.Path("/topics")
+                .Post()
+                .ShouldFail(_app.MockUser())
+                .WithResponse(res =>
+                {
+                    res.StatusCode.ShouldEqual(HttpStatusCode.BadRequest);
+                });
         }
-
-
-        void MockUser()
+        
+        [Fact]
+        public void should_show_topic_detail_page_with_markdown_content()
         {
-            var claims = new List<Claim> {
-                    new Claim(ClaimTypes.NameIdentifier, (-1).ToString(), ClaimValueTypes.Integer32),
-                    new Claim(ClaimTypes.Name, "FancyUser", ClaimValueTypes.String),
-                    new Claim("SigninTime", System.DateTime.UtcNow.Ticks.ToString(), ClaimValueTypes.Integer64)
-                };
-            var identity = new ClaimsIdentity(claims, "Cookies");
-            _theApp.User = new ClaimsPrincipal(identity);
+            string topicUrl = null;
+            
+            _app.Path("/topics")
+                .Post()
+                .WithForm(new
+                {
+                    title = "中文字 &quot;title",
+                    content = "# This is a heading\n**some** <script>content</script>",
+                    type = "1"
+                })
+                .ShouldSuccessWithRedirect(_app.MockUser())
+                .WithResponse(res =>
+                {
+                    topicUrl = res.Headers.Location.ToString();
+                });
+            
+            var topicId = int.Parse(topicUrl.Substring(topicUrl.LastIndexOf('/') + 1));
+            _app.Path($"/topics/{topicId}/replies")
+                .Post()
+                .WithForm(new 
+                {
+                    Content = "# heading in reply\n*italic*"
+                })
+                .ShouldSuccess(_app.MockUser());
+
+            _app.ShouldGet(topicUrl, SigninNotRequired)
+                .WithResponse(response =>
+                {
+                    response.StatusCode.ShouldEqual(HttpStatusCode.OK);
+                    
+                    var content = response.ReadAllContent();
+                    content.ShouldContain("中文字 &amp;quot;title");
+                    content.ShouldNotContain("<br />title");
+                    
+                    content.ShouldContain("<h2>This is a heading</h2>\n\n<p><strong>some</strong> &lt;script&gt;content&lt;/script&gt;</p>");
+                    content.ShouldNotContain("<script>content</script>");
+                    
+                    content.ShouldContain("<h3>heading in reply</h3>\n\n<p><em>italic</em></p>");
+                });
         }
 
     }

@@ -1,0 +1,101 @@
+@import "symbols";
+
+.panel-user-settings {
+  padding-bottom: 30px;
+  
+  h3{
+    margin-bottom: 30px;
+    border-bottom: 1px solid $gray-body-background;
+    padding-bottom: 10px;
+  }
+ 
+  .user-avatar-wrapper {
+    width: 15%;
+    max-width: 160px;
+    text-align: center;
+    font-size: .8em;
+    position: absolute;
+    right: 40px;
+    top: 100px;
+
+    .inner-square {
+      width: 100%;
+      margin-bottom: 10px;
+      position: relative;
+
+      .user-avatar {
+        width: 100%;
+        height: 100%;
+        border-radius: 5px;
+        cursor: pointer;
+        
+        position: absolute;
+        top: 0;
+        left: 0;
+        transition: opacity linear .2s; 
+        
+        &.uploading{
+          opacity: 0.65;
+        }
+      }
+      
+      &:after {
+        content: "";
+        display: block;
+        padding-bottom: 100%;
+      }
+    }
+
+  }
+  
+  input[name=EmailAddress]{
+    float:left;
+  }
+
+  i.glyphicon{
+    margin-left: -21px;
+    top: 14px;
+    float:left;
+  }
+  
+  i.glyphicon-warning-sign{
+    color:$brand-warning
+  }
+  i.glyphicon-ok{
+    color:$brand-success
+  }
+  
+  .confirm-palette{
+    float: left;
+    margin-top: 10px;
+    margin-left: 5px;
+    
+    &.sent{
+      margin-left: -6px;
+    }
+    
+    [data-status]{
+      display: none;
+    }
+  }
+  
+  .verification-operation,.verification-submit{
+    display: none;
+  }
+  .verify-palette{
+    margin-top:5px;
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+  
+  button[type=submit]{
+    margin-top:20px;
+  }
+}

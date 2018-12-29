@@ -1,26 +1,67 @@
-﻿@model TopicShowModel
+﻿@using Discussion.Core.Mvc
+@using Discussion.Web.Services.UserManagement.Avatar
+@inject Discussion.Web.Models.SiteSettings SiteSettings
+@inject IUserAvatarService AvatarService
+@model TopicViewModel
 
 @{
-    ViewData["Title"] = Model.Title;
+    ViewData["Title"] = Model.Topic.Title;
 }
 
-
-@section Head{
-    <link rel="stylesheet" href="~/lib/source/prism/themes/prism.css" />
-}
 <div class="row">
-    <div class="panel no-padding panel-topic-list col-xs-12 col-sm-12 col-md-12 col-lg-12">
-        <div class="panel-heading">
-            @Model.Title
-        </div>
-
-        <div class="panel-body">
-            @Html.Raw(Model.HtmlContent)
-        </div>
-    </div>
+    <article class="panel panel-topic-detail col-xs-12 col-sm-12 col-md-12 col-lg-12">
+        <header class="topic-meta">
+            <img src="@AvatarService.GetUserAvatarUrl(Model.Topic.Author)" class="topic-author-avatar"/>
+            <h1> @Model.Topic.Title </h1>
+            <div>
+                <span class="meta-item author">
+                    作者 @Model.Topic.Author.DisplayName
+                </span>
+                <span class="meta-item created-at">
+                    发布于 <span class="created-at-time" data-created-at="@Html.Timestamp(Model.Topic.CreatedAtUtc)"></span>
+                </span>
+                <span class="meta-item view-count">
+                    @Model.Topic.ViewCount 次浏览
+                </span>
+                <span class="meta-item type">
+                    @Html.DescribeTopicType(Model.Topic.Type)
+                </span>
+            </div>
+        </header>
+        <article class="topic-content">
+            @Html.RenderMarkdown(Model.Topic.Content)
+        </article>
+    </article>
 </div>
 
+@if (Model.Topic.ReplyCount > 0)
+{
+    <partial name="./Partial/_ReplyList.cshtml" for="@Model" />
+}
+
+@if (Context.IsAuthenticated())
+{
+    <partial name="./Partial/_NewReply.cshtml" for="@Model" />
+}
 
 @section Tail{
- <script src="~/lib/source/prism/prism.js"></script>
+    <script>
+        $(function() {
+            var replyUrl = '@Url.Action("Reply", "Reply", new {topicId = Model.Id})';
+            var previewApi = '@Url.Action("RenderMarkdown", "Common", new {maxHeadingLevel = 3})';
+            var app = window.DiscussionApp;
+            var previewSelectors = {
+                tabPreview: '#tab-preview',
+                tabEditor: '#tab-editor',
+                contentPreview: '#preview',
+                contentEditor: '#content-editor'
+            };
+            
+            app.utils.transformTimestampOn('.created-at-time', 'data-created-at');
+            app.utils.transformTimestampOn('.replied-at', 'data-replied-at');
+
+            $("#submit-create").click(app.topic.submitNewReply("#content-editor", replyUrl));
+            app.topic.setupReplyPreview(previewSelectors, previewApi);
+        });
+    </script>
 }

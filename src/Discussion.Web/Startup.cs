@@ -1,171 +1,142 @@
-﻿using Discussion.Web.Data.InMemory;
-using Discussion.Web.Data;
-using Jusfr.Persistent;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Encodings.Web;
+using System.Text.Unicode;
+using Discussion.Core;
+using Discussion.Core.Communication.Email;
+using Discussion.Core.Communication.Sms;
+using Discussion.Core.Cryptography;
+using Discussion.Core.Data;
+using Discussion.Core.FileSystem;
+using Discussion.Core.Mvc;
+using Discussion.Core.Time;
+using Discussion.Migrations.Supporting;
+using Discussion.Web.Models;
+using Discussion.Web.Resources;
+using Discussion.Web.Services;
+using Discussion.Web.Services.TopicManagement;
+using Discussion.Web.Services.UserManagement;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Raven.Client;
-using Raven.Client.Document;
-using System;
-using System.IO;
-using System.Linq;
-using Microsoft.AspNetCore.Http;
-using Discussion.Web.Controllers;
+using Discussion.Web.Services.UserManagement.Avatar;
+using Discussion.Web.Services.UserManagement.EmailConfirmation;
+using Discussion.Web.Services.UserManagement.Identity;
+using Discussion.Web.Services.UserManagement.PhoneNumberVerification;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Options;
 
 namespace Discussion.Web
 {
     public class Startup
     {
-        public IConfigurationRoot Configuration { get;  }
-        public IHostingEnvironment HostingEnvironment { get;  }
+        private readonly IConfiguration _appConfiguration;
+        private readonly IHostingEnvironment _hostingEnvironment;
+        private readonly ILoggerFactory _loggerFactory;
 
-        public Startup(IHostingEnvironment env)
+        public Startup(IHostingEnvironment env, IConfiguration config, ILoggerFactory loggerFactory)
         {
-            HostingEnvironment = env;
-            Configuration = BuildApplicationConfiguration(env.ContentRootPath, env.EnvironmentName).Build();
+            _hostingEnvironment = env;
+            _appConfiguration = config;
+            _loggerFactory = loggerFactory;
         }
 
-        public static void Main(string[] args)
+        private static void Main()
         {
-            var hostBuilder = new WebHostBuilder();
-            ConfigureHost(hostBuilder, addCommandLineArguments: true);
-
-            var host = hostBuilder.Build();
-            host.Run();
-        }
-
-        public static IWebHostBuilder ConfigureHost(IWebHostBuilder hostBuilder, bool addCommandLineArguments = false)
-        {
-            var basePath = Directory.GetCurrentDirectory();
-            var configBuilder = BuildHostingConfiguration(basePath, addCommandLineArguments ? Environment.GetCommandLineArgs() : null);
-            var configuration = configBuilder.Build();
-
-            return hostBuilder.UseContentRoot(basePath)
-                 .UseIISIntegration()
-                .UseKestrel()
+            var host = Configuration
+                .ConfigureHost(new WebHostBuilder(), addCommandLineArguments: true)
                 .UseStartup<Startup>()
-                .UseConfiguration(configuration);
+                .Build();
+            
+            host.Run();
         }
 
         // ConfigureServices is invoked before Configure
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddLogging();
-            services.AddMvc();
-            AddDataServicesTo(services, Configuration);
-            services.AddSingleton<IConfigurationRoot>(this.Configuration);
-            services.AddAuthorization();
+            services.AddSingleton(HtmlEncoder.Create(UnicodeRanges.BasicLatin, UnicodeRanges.CjkUnifiedIdeographs));
+
+            services.ConfigureDataProtection(_appConfiguration);
+            services.AddMvc(options =>
+            {
+                options.ModelBindingMessageProvider.UseTranslatedResources();
+                options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute());
+                options.Filters.Add(new ApiResponseMvcFilter());
+            });
+
+            services.AddSingleton<IClock, SystemClock>();
+            services.AddDataServices(_appConfiguration, _loggerFactory.CreateLogger<Startup>());
+            services.AddIdentityServices();
+            services.AddEmailServices(_appConfiguration);
+            services.AddSmsServices(_appConfiguration);
+
+            services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
+            services.AddSingleton<IContentTypeProvider>(new FileExtensionContentTypeProvider());
+            services.AddSingleton<IFileSystem>(new LocalDiskFileSystem(Path.Combine(_hostingEnvironment.ContentRootPath, "uploaded")));
+            services.AddSingleton<HttpMessageInvoker>(new HttpClient());
+            
+            services.AddSingleton<IActionContextAccessor, ActionContextAccessor>()
+                .AddScoped(sp =>
+                {
+                    var actionAccessor = sp.GetService<IActionContextAccessor>();
+                    var urlHelperFactory = sp.GetService<IUrlHelperFactory>();
+                    return urlHelperFactory.GetUrlHelper(actionAccessor.ActionContext);              
+                });
+            
+            services.AddScoped<IUserAvatarService, UserAvatarService>();
+            services.AddScoped<IPhoneNumberVerificationService, DefaultPhoneNumberVerificationService>();
+            services.AddSingleton<IConfirmationEmailBuilder, DefaultConfirmationEmailBuilder>();
+            services.AddScoped<IUserService, DefaultUserService>();
+
+            services.AddScoped<ITopicService, DefaultTopicService>();
+
+            var siteSettingsSection = _appConfiguration.GetSection(nameof(SiteSettings));
+            if (siteSettingsSection != null)
+            {
+                services.Configure<SiteSettings>(siteSettingsSection);
+            }
+            services.AddSingleton(sp => sp.GetService<IOptions<SiteSettings>>().Value);
         }
 
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
-        {
-            if (env.IsDevelopment())
+        public void Configure(IApplicationBuilder app)
+        {   
+            if (_hostingEnvironment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
             }
             else
             {
                 app.UseExceptionHandler("/error");
-            }
-
-            app.UseCookieAuthentication(new CookieAuthenticationOptions()
-            {
-                AuthenticationScheme = "Cookie",
-                LoginPath = new PathString("/signin"),
-                AccessDeniedPath = new PathString("/access-denied"),
-                AutomaticAuthenticate = true,
-                AutomaticChallenge = true
-            });
-            app.Use((httpContext, next) =>
-            {
-                httpContext.AssignDiscussionPrincipal();
-                return next();
-            });
-            app.UseStaticFiles();
-            app.UseMvc();
-
-
-            var ravenStore = app.ApplicationServices.GetService<Lazy<IDocumentStore>>();
-            if (ravenStore != null)
-            {
-                var lifetime = app.ApplicationServices.GetService<IApplicationLifetime>();
-                lifetime.ApplicationStopping.Register(() =>
-                {
-                    if (ravenStore.IsValueCreated && !ravenStore.Value.WasDisposed)
-                    {
-                        ravenStore.Value.Dispose();
-                    }
-                });
-            }
-        }
-
-        static IConfigurationBuilder BuildApplicationConfiguration(string basePath, string envName)
-        {
-            var builder = new ConfigurationBuilder()
-                              .AddEnvironmentVariables(prefix: "OPENASPNETORG_")
-                              .SetBasePath(basePath)
-                              .AddJsonFile("appsettings.json", optional: true)
-                              .AddJsonFile($"appsettings.{envName}.json", optional: true);
-
-            return builder;
-        }
-
-        static IConfigurationBuilder BuildHostingConfiguration(string basePath, string[] commandlineArgs = null)
-        {
-            var builder = new ConfigurationBuilder()
-                              .AddEnvironmentVariables(prefix: "ASPNETCORE_")
-                              .SetBasePath(basePath)
-                              .AddJsonFile("hosting.json", optional: true);
-
-            if (commandlineArgs != null)
-            {
-                var args = Environment.GetCommandLineArgs();
-                var firstArgs = args.FirstOrDefault(arg => arg.StartsWith("--"));
-                var argsIndex = Array.IndexOf(args, firstArgs);
-
-                if (argsIndex > -1)
-                {
-                    var usefulArgs = args.Skip(argsIndex).ToArray();
-                    builder.AddCommandLine(usefulArgs);
+                if(bool.TryParse(_appConfiguration["HSTS"] ?? "False", out var useHsts) && useHsts)
+                { 
+                    app.UseHsts();
                 }
             }
+            
+            app.UseHttpsRedirection();
+            app.UseAuthentication();
+            app.UseStaticFiles();
+            app.UseMvc();
+            var logger = _loggerFactory.CreateLogger<Startup>();
+            app.EnsureDatabase(connStr =>
+            {
+                logger.LogCritical("正在创建新的数据库结构...");
 
-            return builder;
+                var loggingConfig = _appConfiguration.GetSection(Configuration.ConfigKeyLogging);
+                SqliteMigrator.Migrate(connStr, migrationLogging => Configuration.ConfigureFileLogging(migrationLogging, loggingConfig, true /* enable full logging for migrations */));
+
+                logger.LogCritical("数据库结构创建完成");
+            }, logger);
         }
-
-        static void AddDataServicesTo(IServiceCollection services, IConfiguration _configuration)
-        {
-            var ravenConnectionString = _configuration["ravenConnectionString"];
-
-            if (!string.IsNullOrWhiteSpace(ravenConnectionString)) {
-
-                services.AddSingleton(new Lazy<IDocumentStore>(() =>
-                {
-                    var store = new DocumentStore();
-                    store.ParseConnectionString(ravenConnectionString);
-                    store.Initialize();
-
-                    return store;
-                }));
-
-                services.AddScoped(typeof(IRepositoryContext), (serviceProvider) => {
-                    return new RavenRepositoryContext(() =>
-                    {
-                        return serviceProvider.GetService<Lazy<IDocumentStore>>().Value;
-                    });
-                });
-                services.AddScoped(typeof(Repository<>), typeof(RavenDataRepository<>));
-                services.AddScoped(typeof(IRepository<>), typeof(RavenDataRepository<>));
-                
-                return;
-            }
-
-            var dataContext = new InMemoryResponsitoryContext();
-            services.AddSingleton(typeof(IRepositoryContext), (serviceProvider) => dataContext);
-            services.AddScoped(typeof(Repository<>), typeof(InMemoryDataRepository<>));
-            services.AddScoped(typeof(IRepository<>), typeof(InMemoryDataRepository<>));
-        }
+        
     }
 }

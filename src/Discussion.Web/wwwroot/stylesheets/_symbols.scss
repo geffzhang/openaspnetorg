@@ -1,0 +1,68 @@
+// @import this file into other scss files (to get ability of intelligent sense)
+// define variables and mixins for my site here:
+
+
+
+$brand-primary:                  #aa6cb7;
+$brand-lighter:                  lighten(#aa6cb7, 10%);
+$brand-lightest:                  lighten(#aa6cb7, 20%);
+// purple: #682079
+
+
+$gray-body-background:          #e1e1e1;
+$gray-inner-border: 			#f0f0f0;
+$gray-content-hover:            #f5f5f5;
+$text-color:                    #333;
+
+
+  // Core variables and mixins
+@import "../lib/node_modules/bootstrap-sass/assets/stylesheets/bootstrap/mixins";
+@import "../lib/node_modules/bootstrap-sass/assets/stylesheets/bootstrap/variables";
+
+
+// fontawesome variables
+
+$fa-font-path:                "../lib/node_modules/@fortawesome/fontawesome-free/webfonts";
+@import "../lib/node_modules/@fortawesome/fontawesome-free/scss/variables";
+
+
+
+@mixin article_content(){
+  max-width: 100%;
+
+  h3{
+    font-size:18px;
+  }
+  h4{
+    font-size:16px;
+  }
+
+  & *{
+    max-width: 95%;
+  }
+  
+  img{
+    max-width:75%;
+    max-height:600px;
+  }
+  
+  img[src$='#middle']{
+    max-width:60%;
+    max-height:400px;
+  }
+
+  img[src$='#small']{
+    max-width:30%;
+    max-height:200px;
+  }
+  
+  table {
+    min-width: 40%;
+    max-width: 90%;
+
+    td, th {
+      border: 1px solid $gray-body-background;
+      padding: 5px;
+    }
+  }
+}

@@ -1,24 +1,36 @@
-﻿@inject Microsoft.AspNetCore.Hosting.IHostingEnvironment HostingEnvironment
+﻿@using Discussion.Core.Mvc
+@using Discussion.Web.Services.UserManagement.Avatar
+@inject Microsoft.AspNetCore.Hosting.IHostingEnvironment HostingEnvironment
+@inject IUserAvatarService AvatarService
+
+@{
+    var pageTitle = "dotnetClub";
+    var viewDataTitle = ViewData["Title"];
+    if (null != viewDataTitle)
+    {
+        var title = (string) viewDataTitle;
+        pageTitle =  $"{title} - {pageTitle}";
+    }
+}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"]</title>
-    <meta name="keywords" content="Keywords of the website and page" />
-    <meta name="description" content="Description of the website and page" />
-    <link rel="shortcut icon" href="~/favicon.ico" />
+    <title>@pageTitle</title>
+    <meta name="keywords" content=".NET 开发,.NET Core club, .NET 跨平台, .NET 微服务, DevOps" />
+    <meta name="description" content=".NET Core club 是国内 .NET 开发人员的聚集地，围绕 .NET 技术的问题解答与最佳实践展开讨论" />
+    <link rel="shortcut icon" href="~/favicon/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="~/favicon/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="~/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="~/favicon/favicon-96x96.png">
     <environment names="Development">
-        <link rel="stylesheet" href="~/lib/dist/bootstrap-sass/stylesheets/bootstrap.css" />
-        <link rel="stylesheet" href="~/stylesheets/css/base.css" />
+        <link rel="stylesheet" href="~/dist/packed-css-vendor.css" />
+        <link rel="stylesheet" href="~/dist/packed-css.css" />
     </environment>
     <environment names="QA,Integration,Staging,Production">
-        <link rel="stylesheet" href="https://ajax.aspnetcdn.com/ajax/bootstrap/3.3.6/css/bootstrap.min.css"
-              asp-fallback-href="~/lib/dist/bootstrap-sass/stylesheets/bootstrap.min.css"
-              asp-fallback-test-class="invisible"
-              asp-fallback-test-property="visibility"
-              asp-fallback-test-value="hidden" />
-        <link rel="stylesheet" href="~/stylesheets/css/base.min.css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/dist/packed-css-vendor.min.css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/dist/packed-css.min.css" asp-append-version="true"/>
     </environment>
     @RenderSection("Head", required: false)
 </head>
@@ -27,42 +39,101 @@
         <div class="container">
             <div class="navbar-header">
                 <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#main-navigation">
-                    <span class="sr-only">Toggle navigation</span>
+                    <span class="sr-only">菜单栏</span>
                     <span class="icon-bar"></span>
                     <span class="icon-bar"></span>
                     <span class="icon-bar"></span>
                 </button>
-                <a class="navbar-brand" href="/">Open ASPNET</a>
+                <div class="header-user pull-right hidden-sm hidden-md hidden-lg">
+                    @if (Context.IsAuthenticated())
+                    {
+                        <div class="dropdown">
+                            <div class="dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                                <img src="@AvatarService.GetUserAvatarUrl(Context.DiscussionUser())" class="avatar"/>
+                                <span class="caret"></span>
+                            </div>
+                            <ul class="dropdown-menu" aria-labelledby="dropdownMenu1">
+                                <li class="username-item">你好，<span class="username" title="@Context.DiscussionUser().DisplayName">@Context.DiscussionUser().DisplayName</span></li>
+                                <li role="separator" class="divider"></li>
+                                <li>@Html.ActionLink("设置", "Settings", "User", null, new { @class = "user-settings-link" })</li>
+                                <li>
+                                    <form class="signout-form" asp-action="DoSignOut" asp-controller="Account" method="post">
+                                        <button>注销</button>
+                                    </form>
+                                </li>
+                            </ul>
+                        </div>
+                    }
+                    else
+                    {
+                        @Html.ActionLink("注册", "Register", "Account", null, new {@class = "signin-link"})
+                        <span>&nbsp;</span>
+                        @Html.ActionLink("登录", "Signin", "Account", null, new {@class = "signin-link"})
+                    }
+                </div>
+                <a class="navbar-brand" href="/">dotnetClub</a>
             </div>
             <div id="main-navigation" class="navbar-collapse collapse">
                 <ul class="nav navbar-nav">
                     <li class="active"><a href="/">首页</a></li>
                     <li><a href="/about">关于</a></li>
                 </ul>
+                <div class="header-user pull-right hidden-xs">
+                    @if (Context.IsAuthenticated())
+                    {
+                        <div class="dropdown">
+                            <div class="dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                                <img src="@AvatarService.GetUserAvatarUrl(Context.DiscussionUser())" class="avatar"/>
+                                <span class="caret"></span>
+                            </div>
+                            <ul class="dropdown-menu" aria-labelledby="dropdownMenu2">
+                                <li class="username-item">你好，<span class="username" title="@Context.DiscussionUser().DisplayName">@Context.DiscussionUser().DisplayName</span></li>
+                                <li role="separator" class="divider"></li>
+                                <li>@Html.ActionLink("设置", "Settings", "User", null, new { @class = "user-settings-link" })</li>
+                                <li>
+                                    <form class="signout-form" asp-action="DoSignOut" asp-controller="Account" method="post">
+                                        <button>注销</button>
+                                    </form>
+                                </li>
+                            </ul>
+                        </div>
+                    }
+                    else
+                    {
+                        @Html.ActionLink("注册", "Register", "Account", null, new {@class = "signin-link"})
+                        <span>&nbsp;</span>
+                        @Html.ActionLink("登录", "Signin", "Account", null, new {@class = "signin-link"})
+                    }
+                </div>
             </div>
         </div>
     </nav>
+
     @RenderSection("PreContent", required: false)
+
     <div class="container body-content">
-        @RenderBody()        
+        @RenderBody()
     </div>
+
     @RenderSection("PostContent", required: false)
 
-    <environment names="Development">
-        <script src="~/lib/dist/jquery/jquery.js"></script>
-        <script src="~/lib/dist/bootstrap-sass/javascripts/bootstrap.js"></script>
-    </environment>
-    <environment names="QA,Integration,Staging,Production">
-        <script src="https://ajax.aspnetcdn.com/ajax/jquery/jquery-2.1.4.min.js"
-                asp-fallback-src="~/lib/dist/jquery/jquery.min.js"
-                asp-fallback-test="window.jQuery">
-        </script>
-        <script src="https://ajax.aspnetcdn.com/ajax/bootstrap/3.3.6/bootstrap.min.js"
-                asp-fallback-src="~/lib/dist/bootstrap-sass/javascripts/bootstrap.min.js"
-                asp-fallback-test="window.jQuery && window.jQuery.fn && window.jQuery.fn.modal">
-        </script>
-    </environment>
+<footer class="page-footer container">
+    <p class="pull-left">© @DateTime.Today.Year dotnetClub</p>
+    <p class="pull-right">本站与微软无关。所有话题及回复仅代表作者观点，其版权归属为作者本人。 <a href="https://jinshuju.net/f/PzMDyb" class="report-link" target="_blank">举报不良信息</a></p>
+</footer>
 
+<environment names="Development">
+    <script src="~/dist/packed-js-vendor.js"></script>
+    <script src="~/dist/packed-js.js"></script>
+</environment>
+<environment names="QA,Integration,Staging,Production">
+    <script src="~/dist/packed-js-vendor.min.js" asp-append-version="true"></script>
+    <script src="~/dist/packed-js.min.js" asp-append-version="true"></script>
+</environment>
+<script>
+    @* 相关文档： https://docs.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-2.1  *@
+    window.__RequestVerificationToken = '@Html.AntiForgeryTokenValue()';
+</script>
     @RenderSection("Tail", required: false)
 </body>
 </html>

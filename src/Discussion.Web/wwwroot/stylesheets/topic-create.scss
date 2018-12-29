@@ -1,0 +1,99 @@
+@import "symbols";
+
+
+.topic-title-container{
+  background: white;
+  margin-top: 30px;
+  padding-top: 15px;
+  border-radius: 3px;
+  
+  
+  #new-topic-title{
+    width: calc( 100% - 20px );
+    height: 35px;
+    margin: 0 10px;
+    border: none;
+    outline: none;
+    font-size: 16px;
+    border-bottom: 1px solid $gray-body-background;
+  }
+}
+
+
+.topic-content-container {
+  .note-editor.panel {
+    border: none;
+    border-radius: 0;
+
+    .panel-heading.note-toolbar {
+      background: transparent;
+      border: none;
+      padding: 5px 10px;
+      
+      .btn-view-markdown{
+        font-size: 14px;
+      }
+    }
+
+    .btn.note-btn {
+      border: none;
+      color: $gray;
+    }
+  }
+
+  .note-editor.note-frame .note-editing-area .note-editable{
+    @include article_content
+  }
+  
+  .note-editor.note-frame .note-editing-area .note-codable{
+    background-color: $gray-content-hover;
+    color: $text-color;
+  }
+}
+
+.topic-submit-section{
+  padding-right: 10px;
+  margin-top: 15px;
+  margin-bottom: 80px;
+  
+  .topic-type-dropdown,.submit-create-btn{
+    float:right;
+  }
+
+  .topic-type-dropdown{
+    margin-right: 20px;
+    
+    .dropdown-toggle{
+      padding-top: 5px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+  }
+
+  .submit-create-btn{
+    width:100px;
+  }
+  
+}
+
+
+
+
+i.fab{
+  font-style:normal;
+
+  &:before{
+    display: inline-block;
+    font-size: inherit;
+    -webkit-font-smoothing: antialiased;
+    text-decoration: inherit;
+    text-rendering: auto;
+    text-transform: none;
+    vertical-align: middle;
+    speak: none;
+  }
+}
+
+i.fab.fa-markdown:before{
+  content:'\f60f'
+}

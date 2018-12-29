@@ -1,0 +1,24 @@
+<h3>登录</h3>
+<form nz-form [formGroup]="form" (ngSubmit)="submit()" role="form">
+  <nz-alert *ngIf="error" [nzType]="'error'" [nzMessage]="error" [nzShowIcon]="true" class="mb-lg"></nz-alert>
+  <nz-form-item>
+    <nz-form-control>
+      <nz-input-group nzSize="large" nzPrefixIcon="anticon anticon-user">
+        <input nz-input formControlName="userName" placeholder="用户名">
+      </nz-input-group>
+      <nz-form-explain *ngIf="userName.dirty && userName.errors">请输入用户名</nz-form-explain>
+    </nz-form-control>
+  </nz-form-item>
+  <nz-form-item>
+    <nz-form-control>
+      <nz-input-group nzSize="large" nzPrefixIcon="anticon anticon-lock">
+        <input nz-input type="password" formControlName="password" placeholder="密码">
+      </nz-input-group>
+      <nz-form-explain *ngIf="password.dirty && password.errors">请输入密码</nz-form-explain>
+    </nz-form-control>
+  </nz-form-item>
+  <nz-form-item>
+    <button nz-button type="submit" class="submit" nzType="primary" nzSize="large" [nzLoading]="loading" nzBlock>登录</button>
+    <a class="register" routerLink="/passport/register">注册新用户</a>
+  </nz-form-item>
+</form>
